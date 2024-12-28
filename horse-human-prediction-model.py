@@ -1,12 +1,7 @@
 import os
-import random
-import numpy as np
-from io import BytesIO
-
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-
 import tensorflow as tf
+
+from utils import display_random_data, plot_train_accuracy
 
 TRAIN_DIR = 'horse-or-human'
 
@@ -33,28 +28,9 @@ print(f"5 files in humans subdir:{train_human_names[:5]}")
 print(f"total training horse images: {len(os.listdir(train_horse_dir))}")
 print(f"total training human images: {len(os.listdir(train_human_dir))}")
 
-# Parameters for your graph; you will output images in a 4x4 configuration
-nrows = 4
-ncols = 4
+# display batch of 8 horses and 8 humans
+display_random_data(train_horse_dir, train_horse_names, train_human_dir, train_human_names)
 
-# Set up matplotlib fig, and size it to fit 4x4 pics
-fig = plt.gcf()
-fig.set_size_inches(ncols * 3, nrows * 3)
-
-next_horse_pix = [os.path.join(train_horse_dir, fname)
-                for fname in random.sample(train_horse_names, k=8)]
-next_human_pix = [os.path.join(train_human_dir, fname)
-                for fname in random.sample(train_human_names, k=8)]
-
-for i, img_path in enumerate(next_horse_pix + next_human_pix):
-    # Set up subplot; subplot indices start at 1
-    sp = plt.subplot(nrows, ncols, i + 1)
-    sp.axis('Off') # Don't show axes (or gridlines)
-
-    img = mpimg.imread(img_path)
-    plt.imshow(img)
-
-plt.show()
 
 # ConvNet architecture
 model = tf.keras.models.Sequential([
@@ -83,8 +59,53 @@ model = tf.keras.models.Sequential([
     tf.keras.layers.Flatten(),
     tf.keras.layers.Dense(512, activation='relu'),
 
+    # output will be a value between 0 and 1, 
+    # 0 -> horses, 1 -> human ( set according to alphabetical order, refer DATA PREPROCESSING part below)
     tf.keras.layers.Dense(1, activation='sigmoid'),
 ])
 
 # Analysis of the model
 model.summary()
+
+model.compile(
+    loss='binary_crossentropy',
+    optimizer=tf.keras.optimizers.RMSprop(learning_rate=0.001),
+    metrics=['accuracy']
+)
+
+# DATA PREPROCESSING 
+# Reading the pics from source folder and converting them into tensors
+train_dataset = tf.keras.utils.image_dataset_from_directory(
+    TRAIN_DIR,
+    image_size=(300, 300),
+    batch_size=32,
+    label_mode='binary'
+)
+
+# Check the type
+dataset_type = type(train_dataset)
+print(f'train_dataset inherits from tf.data.Dataset: {issubclass(dataset_type, tf.data.Dataset)}')
+
+# Rescaling image by normalizing for better perfomance
+rescale_layer = tf.keras.layers.Rescaling(scale=1./255)
+
+train_dataset_scaled = train_dataset.map(lambda image, label : (rescale_layer(image), label))
+
+# Configuring the dataset
+SHUFFLE_BUFFER_SIZE = 1000 #it will first select a sample from the first 1,000 elements, 
+                           # then keep filling this buffer until all elements have been selected.
+PREFETCH_BUFFER_SIZE = tf.data.AUTOTUNE
+
+train_dataset_final = (train_dataset_scaled
+                       .cache() #stores elements in mem for faster access if you need it again
+                       .shuffle(SHUFFLE_BUFFER_SIZE) #shuffles dataset randomly according to the buffer size
+                       )
+
+history = model.fit(
+    train_dataset_final,
+    epochs=15,
+    verbose=2
+)
+
+# Plot the training accuracy for each epoch
+plot_train_accuracy(history)
